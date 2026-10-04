@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>5秒後の通知テスト</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, "Yu Gothic UI", "Meiryo", sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f2f5f9; color: #162235; }
+      main { width: min(520px, calc(100vw - 40px)); padding: 32px; box-sizing: border-box; border-radius: 20px; background: white; box-shadow: 0 16px 50px #16223515; }
+      h1 { margin: 0 0 12px; font-size: clamp(24px, 5vw, 32px); }
+      p { line-height: 1.7; }
+      .lead { margin: 0 0 24px; color: #526178; }
+      button { width: 100%; border: 0; border-radius: 12px; padding: 15px 20px; background: #1769e0; color: white; font: inherit; font-weight: 700; cursor: pointer; }
+      button:hover:not(:disabled) { background: #0d55bd; }
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      label { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; cursor: pointer; }
+      input { width: 18px; height: 18px; accent-color: #1769e0; }
+      #status { min-height: 3em; margin: 22px 0 0; padding: 14px 16px; border-radius: 10px; background: #edf4ff; }
+      .note { margin: 20px 0 0; font-size: 13px; color: #65738a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>5秒後の通知テスト</h1>
+      <p class="lead">ボタンを押したら、別のタブやアプリに切り替えてください。このタブは開いたままにします。</p>
+      <button id="start" type="button">5秒後に通知する</button>
+      <label><input id="sound" type="checkbox" checked /> 通知時に短い音も鳴らす</label>
+      <p id="status" role="status" aria-live="polite">準備できました。通知の許可を求められたら「許可」を選んでください。</p>
+      <p class="note">Windows の集中モードやブラウザの通知設定により、表示や音が抑制される場合があります。</p>
+    </main>
+    <script>
+      const startButton = document.querySelector('#start');
+      const soundCheckbox = document.querySelector('#sound');
+      const status = document.querySelector('#status');
+      let audioContext;
+
+      function setStatus(message) {
+        status.textContent = message;
+      }
+
+      function prepareAudio() {
+        if (!soundCheckbox.checked) return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) return;
+        try {
+          audioContext ||= new AudioContextClass();
+          // resume() is called directly from the button gesture so background audio is allowed.
+          audioContext.resume().catch(() => {});
+        } catch (_) {
+          // Audio is optional; a sound-device error must not prevent the notification.
+        }
+      }
+
+      function playChime() {
+        if (!soundCheckbox.checked || !audioContext || audioContext.state !== 'running') return;
+        const now = audioContext.currentTime;
+        for (const [offset, frequency] of [[0, 660], [0.17, 880]]) {
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0.0001, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.15, now + offset + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.15);
+          oscillator.connect(gain).connect(audioContext.destination);
+          oscillator.start(now + offset);
+          oscillator.stop(now + offset + 0.16);
+        }
+      }
+
+      startButton.addEventListener('click', async () => {
+        if (!('Notification' in window)) {
+          setStatus('このブラウザは通知 API に対応していません。');
+          return;
+        }
+        if (!window.isSecureContext) {
+          setStatus('通知を使うには localhost または HTTPS で開いてください。README の起動手順を参照してください。');
+          return;
+        }
+
+        startButton.disabled = true;
+        setStatus('通知の許可を確認しています…');
+        try {
+          // Request permission in the click gesture. The first run starts its five seconds after approval.
+          const permissionPromise = Notification.permission === 'default'
+            ? Notification.requestPermission()
+            : Promise.resolve(Notification.permission);
+          prepareAudio();
+          const permission = await permissionPromise;
+          if (permission !== 'granted') {
+            setStatus('通知が許可されていません。ブラウザのサイト設定で通知を許可してから再試行してください。');
+            startButton.disabled = false;
+            return;
+          }
+
+          setStatus('5秒後に通知します。別のタブやアプリに切り替えてください。');
+          window.setTimeout(() => {
+            try {
+              const notification = new Notification('通知テスト', {
+                body: 'ボタンを押してから5秒が経ちました。',
+                tag: `notification-mvp-${Date.now()}`
+              });
+              notification.onclick = () => {
+                window.focus();
+                notification.close();
+              };
+              playChime();
+              setStatus('通知を送信しました。もう一度試せます。');
+            } catch (error) {
+              setStatus(`通知を送れませんでした: ${error.message}`);
+            } finally {
+              startButton.disabled = false;
+            }
+          }, 5000);
+        } catch (error) {
+          setStatus(`通知の許可を確認できませんでした: ${error.message}`);
+          startButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

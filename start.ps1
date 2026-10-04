@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 # index.html を読み込む
 $html = [System.IO.File]::ReadAllBytes(
